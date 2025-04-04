@@ -1,4 +1,4 @@
 .env
 __pycache__/
-test*.py
+test*.*
 chroma_db
