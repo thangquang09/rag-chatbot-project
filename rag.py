@@ -14,7 +14,7 @@ from langgraph.prebuilt import ToolNode
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
-from vectorstore import get_vectorstore
+from vectorstore import get_vectorstore_retriever
 import os
 import logging
 import pprint
@@ -24,16 +24,14 @@ logging.basicConfig(level=logging.INFO)
 
 # VECTOR DATABASE & RETRIEVER TOOL
 
-vectorstore = get_vectorstore()
-retriever = vectorstore.as_retriever(k=3)
+vectorstore, retriever = get_vectorstore_retriever()
 
 retriever_tool = create_retriever_tool(
-    retriever=retriever,
-    name="retriever_tool",
-    description="Return relevant documents"
+    retriever=retriever, name="retriever_tool", description="Return relevant documents"
 )
-## DEFINE TOOLS
+## DEFINE TOOL
 tools = [retriever_tool]
+
 
 # Utils
 def get_history_from_messages(messages: Sequence[BaseMessage]) -> str:
@@ -44,38 +42,39 @@ def get_history_from_messages(messages: Sequence[BaseMessage]) -> str:
 
     return chat_history
 
+
 # GET LLMS
 
-def get_llm(
-    model:str = "gemini-2.0-flash",
-    model_provider: str = "google_genai"
-):
+
+def get_llm(model: str = "gemini-2.0-flash", model_provider: str = "google_genai"):
     model = init_chat_model(
         model=model,
         model_provider=model_provider,
-        GOOGLE_API_KEY=os.getenv("GOOGLE_API_KEY")
+        GOOGLE_API_KEY=os.getenv("GOOGLE_API_KEY"),
     )
     return model
+
 
 # STATE DEFINE
 class State(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
-    # memory: 
+    # memory:
+
 
 # NOTES AND EDGES
 
+
 def grade_documents(state: State) -> Literal["generate", "rewrite"]:
-    """Check if documents are relevant to query
-    """
-    
+    """Check if documents are relevant to query"""
+
     # Data Model
     class Grade(BaseModel):
         binary_score: str = Field(description="Relevance score: 'yes' or 'no'")
-        
+
     messages = state["messages"]
     # find documents (last message)
     docs = messages[-1].content
-    
+
     # find the newest user query
     question = None
     for message in reversed(messages):
@@ -96,27 +95,25 @@ def grade_documents(state: State) -> Literal["generate", "rewrite"]:
         Give a binary score 'yes' or 'no' score to indicate whether the document is relevant to the question.""",
         input_variables=["context", "question"],
     )
-    
+
     # chain
     llm = get_llm()
     llm = llm.with_structured_output(Grade)
-    
+
     chain = prompt | llm
-    
-    scored_result = chain.invoke({
-        "question": question,
-        "context": docs
-    }).binary_score
-    
+
+    scored_result = chain.invoke({"question": question, "context": docs}).binary_score
+
     logging.info(f"##Grading Task: scored_result = {scored_result}")
-    
+
     if scored_result == "yes":
         logging.info("##Grading Task: Docs relevant")
         return "generate"
     else:
         logging.info("##Grading Task: Docs not relevant")
         return "rewrite"
-    
+
+
 def agent(state: State) -> State:
     logging.info("##Agent Task: Call")
     messages = state["messages"]
@@ -125,28 +122,30 @@ def agent(state: State) -> State:
     llm_with_tool = llm.bind_tools(tools)
 
     response = llm_with_tool.invoke(messages)
-    
-    return {
-        "messages": [response]
-    }
+
+    return {"messages": [response]}
+
 
 def rewrite(state: State) -> State:
     return state
 
+
 def generate(state: State) -> State:
     return state
-    
-    
+
+
 inputs = State(
     {
         "messages": [
             HumanMessage(content="Hello, my name is Thang"),
             AIMessage(content="Hello, how can I have you?"),
-            HumanMessage(content="What does Lilian Weng say about the types of agent memory?"),
+            HumanMessage(
+                content="What does Lilian Weng say about the types of agent memory?"
+            ),
         ]
     }
 )
-    
+
 # WORKFLOW
 if __name__ == "__main__":
     workflow = StateGraph(State)
@@ -162,30 +161,18 @@ if __name__ == "__main__":
     workflow.add_edge(START, "agent")
 
     workflow.add_conditional_edges(
-        "agent",
-        tools_condition,
-        {
-            "tools": "retrieve",
-            END: END
-        }
+        "agent", tools_condition, {"tools": "retrieve", END: END}
     )
 
-    workflow.add_conditional_edges(
-        "retrieve",
-        grade_documents
-    )
+    workflow.add_conditional_edges("retrieve", grade_documents)
 
     workflow.add_edge("generate", END)
     workflow.add_edge("rewrite", END)
 
     graph = workflow.compile()
 
-
-
     output = graph.invoke(inputs)
-    output["messages"].append(
-        HumanMessage(content="What is my name?")
-    )
+    output["messages"].append(HumanMessage(content="What is my name?"))
 
     output = graph.invoke(output)
 
