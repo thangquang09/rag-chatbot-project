@@ -3,7 +3,14 @@ import logging
 import streamlit as st
 
 from crawl import check_valid_url, load_web_content
-from rag import AIMessage, HumanMessage, State, StateGraph, SystemMessage, get_workflow
+from rag_class import (
+    AIMessage,
+    HumanMessage,
+    State,
+    StateGraph,
+    SystemMessage,
+    WorkFlow,
+)
 from setting import MAX_HISTORY
 
 # Set up logging
@@ -18,46 +25,15 @@ st.set_page_config(
 )
 
 
-@st.cache_resource
-def load_workflow() -> StateGraph:
-    try:
-        workflow = get_workflow()
-        return workflow
-    except Exception as e:
-        logging.error(f"Error loading workflow: {e}")
-        st.error(f"Error loading workflow: {e}")
-        return None
-
-
-# def generate_text(prompt: str) -> str:
-#     workflow = load_workflow()
-
-#     # Limit number of chat history
-#     messages = st.session_state.langchain_messages[-MAX_HISTORY:].copy()
-
-#     # ensure that user prompt in context
-#     if not messages or messages[-1].content != prompt:
-#         messages.append(HumanMessage(content=prompt))
-
-#     state = State({"messages": messages, "rewrite_times": 0})
-
+# @st.cache_resource
+# def load_workflow() -> StateGraph:
 #     try:
-#         logging.info(f"Running workflow with prompt: {prompt}")
-#         result = workflow.invoke(state)
-
-#         st.session_state.last_workflow_state = result
-
-#         if result and "messages" in result and result["messages"]:
-#             response = result["messages"][-1]
-
-#             if hasattr(response, "content"):
-#                 return response.content
-#             return str(response)
-#         else:
-#             return "I couldn't generate a response."
+#         workflow = get_workflow()
+#         return workflow
 #     except Exception as e:
-#         logging.error(f"Error during workflow execution: {e}")
-#         return f"An error occurred: {str(e)}"
+#         logging.error(f"Error loading workflow: {e}")
+#         st.error(f"Error loading workflow: {e}")
+#         return None
 
 
 def generate(workflow: StateGraph, state: State) -> State:
@@ -78,7 +54,8 @@ def main():
     st.title("Chatbot")
     st.write("This is a simple chatbot application.")
 
-    workflow = load_workflow()
+    RAG_workflow = WorkFlow()
+    workflow = RAG_workflow.get_workflow()
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
@@ -91,18 +68,19 @@ def main():
         )
 
     with st.sidebar:
-        # st.header("Settings")
-        # url = st.text_input("Search URL:")
-        # flag = check_valid_url(url)
-        # if flag:
-        #     try:
-        #         all_splits = load_web_content(url)
-        #         logging.info(f"Loaded {len(all_splits)} documents from {url}")
-        #         st.logging(f"Loaded {len(all_splits)} documents")
-        #         ### code vector .add
-        #     except Exception as e:
-        #         logging.error(f"Error loading URL: {str(e)}")
-        #         st.error(f"Error loading URL: {str(e)}")
+        st.header("Settings")
+        url = st.text_input("Search URL:")
+        flag = check_valid_url(url)
+        if flag:
+            try:
+                all_splits = load_web_content(url)
+                logging.info(f"Loaded {len(all_splits)} documents from {url}")
+                st.logging(f"Loaded {len(all_splits)} documents")
+                ### code vector .add
+
+            except Exception as e:
+                logging.error(f"Error loading URL: {str(e)}")
+                st.error(f"Error loading URL: {str(e)}")
         # else:
         #     st.error("Invalid URL provided.")
         #     ### code
@@ -111,9 +89,15 @@ def main():
         #     ### code
 
         if st.button("Clear History"):
-            # st.session_state.messages = []
-            # st.session_state.langchain_messages = []
-            # st.session_state.last_workflow_state = None
+            if "messages" in st.session_state:
+                st.session_state.messages = []
+            if "state" in st.session_state:
+                st.session_state.state = State(
+                    {
+                        "messages": [],
+                        "rewrite_times": 0,
+                    }
+                )
             st.success("History cleared!")
 
     # Display chat history
