@@ -117,6 +117,12 @@ def main():
             st.subheader("Last Workflow State")
             if "last_workflow_state" in st.session_state:
                 st.write(st.session_state.last_workflow_state)
+                
+        if st.button("Clear History"):
+            st.session_state.messages = []
+            st.session_state.langchain_messages = []
+            st.session_state.last_workflow_state = None
+            st.success("History cleared!")
     # Display chat history
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
