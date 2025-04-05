@@ -4,6 +4,7 @@ import streamlit as st
 
 from crawl import check_valid_url, load_web_content
 from rag import AIMessage, HumanMessage, State, SystemMessage, get_workflow
+from setting import MAX_HISTORY
 
 # Set up logging
 logging.basicConfig(
@@ -19,7 +20,7 @@ st.set_page_config(
 
 @st.cache_resource
 def load_workflow():
-    try:     
+    try:
         workflow = get_workflow()
         return workflow
     except Exception as e:
@@ -27,41 +28,29 @@ def load_workflow():
         st.error(f"Error loading workflow: {e}")
         return None
 
-def convert_to_langchain_messages(streamlit_messages):
-    """Convert Streamlit message format to Langchain message objects"""
-    langchain_messages = []
-    for msg in streamlit_messages:
-        if msg["role"] == "user":
-            langchain_messages.append(HumanMessage(content=msg["content"]))
-        elif msg["role"] == "assistant":
-            langchain_messages.append(AIMessage(content=msg["content"]))
-        elif msg["role"] == "system":
-            langchain_messages.append(SystemMessage(content=msg["content"]))
-    return langchain_messages
+
+def add_message(role, content):
+    # Thêm vào định dạng Streamlit
+    st.session_state.messages.append({"role": role, "content": content})
+
+    # Thêm vào định dạng Langchain
+    if role == "user":
+        st.session_state.langchain_messages.append(HumanMessage(content=content))
+    elif role == "assistant":
+        st.session_state.langchain_messages.append(AIMessage(content=content))
+    elif role == "system":
+        st.session_state.langchain_messages.append(SystemMessage(content=content))
 
 
-def convert_to_streamlit_messages(langchain_messages):
-    """Convert Langchain message objects to Streamlit message format"""
-    streamlit_messages = []
-    for msg in langchain_messages:
-        if isinstance(msg, HumanMessage):
-            streamlit_messages.append({"role": "user", "content": msg.content})
-        elif isinstance(msg, AIMessage):
-            streamlit_messages.append({"role": "assistant", "content": msg.content})
-        elif isinstance(msg, SystemMessage):
-            streamlit_messages.append({"role": "system", "content": msg.content})
-    return streamlit_messages
-
-
-def generate_text(prompt: str, history=None) -> str:
+def generate_text(prompt: str) -> str:
     workflow = load_workflow()
 
-    if history:
-        messages = convert_to_langchain_messages(history)
-        if not messages or messages[-1].content != prompt:
-            messages.append(HumanMessage(content=prompt))
-    else:
-        messages = [HumanMessage(content=prompt)]
+    # Limit number of chat history
+    messages = st.session_state.langchain_messages[-MAX_HISTORY:].copy()
+
+    # ensure that user prompt in context
+    if not messages or messages[-1].content != prompt:
+        messages.append(HumanMessage(content=prompt))
 
     state = State({"messages": messages, "rewrite_times": 0})
 
@@ -81,7 +70,7 @@ def generate_text(prompt: str, history=None) -> str:
             return "I couldn't generate a response."
     except Exception as e:
         logging.error(f"Error during workflow execution: {e}")
-        return "An error occurred while generating the response."
+        return f"An error occurred: {str(e)}"
 
 
 def main():
@@ -90,6 +79,8 @@ def main():
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
+    if "langchain_messages" not in st.session_state:
+        st.session_state.langchain_messages = []
 
     with st.sidebar:
         # st.header("Settings")
@@ -112,13 +103,20 @@ def main():
         #     ### code
         st.header("Debug Information")
         if st.checkbox("Show debug info"):
-            st.subheader("Session Messages")
+            st.subheader("Streamlit Messages")
+            st.write(f"Count: {len(st.session_state.messages)}")
             st.json(st.session_state.messages)
+
+            st.subheader("Langchain Messages")
+            st.write(f"Count: {len(st.session_state.langchain_messages)}")
+            for i, msg in enumerate(st.session_state.langchain_messages):
+                st.write(
+                    f"{i + 1}. Type: {type(msg).__name__}, Content: {msg.content[:50]}..."
+                )
 
             st.subheader("Last Workflow State")
             if "last_workflow_state" in st.session_state:
                 st.write(st.session_state.last_workflow_state)
-
     # Display chat history
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
@@ -134,11 +132,9 @@ def main():
         # Generate response
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                response = generate_text(prompt, st.session_state.messages)
+                response = generate_text(prompt)
                 if response:
-                    st.session_state.messages.append(
-                        {"role": "assistant", "content": response}
-                    )
+                    add_message("assistant", response)
                     st.markdown(response)
 
 
