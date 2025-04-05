@@ -1,13 +1,14 @@
-from langchain_community.document_loaders import WebBaseLoader
+import logging
+import os
+
 from langchain_chroma import Chroma
+from langchain_community.document_loaders import WebBaseLoader
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from dotenv import load_dotenv
-import os
-import logging
+
+from setting import CHUNK_OVERLAP, CHUNK_SIZE, K
 
 logging.basicConfig(level=logging.INFO)
-load_dotenv()
 
 
 def get_vectorstore_retriever():
@@ -17,9 +18,7 @@ def get_vectorstore_retriever():
         "https://lilianweng.github.io/posts/2023-10-25-adv-attack-llm/",
     ]
 
-    embeddings = GoogleGenerativeAIEmbeddings(
-        model="models/text-embedding-004", GOOGLE_API_KEY=os.getenv("GOOGLE_API_KEY")
-    )
+    embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
     persist_directory = "chroma_db"
     collection_name = "rag-chroma"
 
@@ -36,7 +35,7 @@ def get_vectorstore_retriever():
         docs_list = [item for sublist in docs for item in sublist]
 
         text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
-            chunk_size=100, chunk_overlap=50
+            chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP
         )
         doc_splits = text_splitter.split_documents(docs_list)
 
@@ -48,5 +47,5 @@ def get_vectorstore_retriever():
         )
         vectorstore.persist()
 
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+    retriever = vectorstore.as_retriever(search_kwargs={"k": K})
     return vectorstore, retriever
