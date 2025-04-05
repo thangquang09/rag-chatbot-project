@@ -16,6 +16,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
+from utils import get_history_from_messages, get_n_user_queries
 from vectorstore import get_vectorstore_retriever
 
 load_dotenv()
@@ -31,44 +32,25 @@ retriever_tool = create_retriever_tool(
 ## DEFINE TOOL
 tools = [retriever_tool]
 
-
-# Utils
-def get_history_from_messages(messages: Sequence[BaseMessage]) -> str:
-    chat_history = ""
-    for message in messages:
-        if message.type in ("human", "ai"):
-            chat_history += f"Role: {message.type} - Content: {message.content}\n\n"
-
-    ### Summarize if needed
-
-    return chat_history
-
-
-def get_n_user_queries(messages: Sequence[BaseMessage], n: int = 1) -> str:
-    """Get the n most recent user queries from messages"""
-    question = ""
-    number_of_question = 0
-    for idx, message in enumerate(reversed(messages)):
-        if isinstance(message, HumanMessage):
-            if number_of_question == 0:
-                question = f"Newest user query: {message.content}"
-            else:
-                question += f"\n{message.content}"
-            number_of_question += 1
-            if number_of_question >= n:
-                break
-    return question
-
-
 # GET LLMS
 
 
-def get_llm(model: str = "gemini-2.0-flash", model_provider: str = "google_genai"):
-    model = init_chat_model(
-        model=model,
-        model_provider=model_provider,
-        GOOGLE_API_KEY=os.getenv("GOOGLE_API_KEY"),
-    )
+def get_llm(
+    model: str = "gemini-2.0-flash", model_provider: str = "google_genai", **kwargs
+):
+    model_kwargs = {
+        "model": model,
+        "model_provider": model_provider,
+        "GOOGLE_API_KEY": os.getenv("GOOGLE_API_KEY"),
+        "temperature": kwargs.get("temperature", 0.7),
+        "max_tokens": kwargs.get("max_tokens", 1024),
+        "top_p": kwargs.get("top_p", 0.95),
+        "streaming": kwargs.get("streaming", False),
+    }
+
+    model_kwargs = {k: v for k, v in model_kwargs.items() if v is not None}
+
+    model = init_chat_model(**model_kwargs)
     return model
 
 
@@ -150,15 +132,15 @@ def agent(state: State) -> State:
 def rewrite(state: State) -> State:
     """Rewrite the user query for better documents retrieval"""
     logging.info("##Rewrite Task: Call")
-    
+
     current_rewrites = state.get("rewrite_times", 0)
     new_rewrite_count = current_rewrites + 1
-    
+
     messages = state["messages"]
     orginial_query = get_n_user_queries(messages, 1)
     logging.info(f"##Rewrite Task: Original query: {orginial_query}")
     logging.info(f"##Rewrite Task: Attempt {new_rewrite_count}")
-    
+
     class RewrittenQuery(BaseModel):
         query: str = Field(description="The rewritten search query", min_length=3)
         reasoning: str = Field(
@@ -229,23 +211,9 @@ def generate(state: State) -> State:
     return {"messages": [response]}
 
 
-
-
 # WORKFLOW
-if __name__ == "__main__":
-    
-    inputs = State(
-        {
-            "messages": [
-                HumanMessage(content="Hello, my name is Thang"),
-                AIMessage(content="Hello, how can I have you?"),
-                HumanMessage(
-                    content="What does Lilian Weng say about the types of agent memory?"
-                ),
-            ]
-        }
-    )
-    
+
+def get_workflow():
     workflow = StateGraph(State)
 
     ## Node
@@ -268,10 +236,22 @@ if __name__ == "__main__":
     workflow.add_edge("rewrite", "agent")
 
     graph = workflow.compile()
+    return graph
 
+if __name__ == "__main__":
+    inputs = State(
+        {
+            "messages": [
+                HumanMessage(content="Hello, my name is Thang"),
+                AIMessage(content="Hello, how can I have you?"),
+                HumanMessage(
+                    content="What does Lilian Weng say about the types of agent memory?"
+                ),
+            ]
+        }
+    )
+    graph = get_workflow()
+    
     output = graph.invoke(inputs)
-    output["messages"].append(HumanMessage(content="What is my name?"))
-
-    output = graph.invoke(output)
 
     print(output)
