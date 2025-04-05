@@ -7,7 +7,13 @@ from dotenv import load_dotenv
 from langchain import hub
 from langchain.chat_models import init_chat_model
 from langchain.tools.retriever import create_retriever_tool
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
 from langchain_core.tools import tool
@@ -119,10 +125,17 @@ def grade_documents(state: State) -> Literal["generate", "rewrite"]:
 
 def agent(state: State) -> State:
     logging.info("##Agent Task: Call")
-    messages = [msg for msg in state["messages"] 
-               if isinstance(msg, (HumanMessage, AIMessage)) 
-               and not (isinstance(msg, AIMessage) and msg.content == "" and msg.additional_kwargs.get("function_call"))]
-    
+    messages = [
+        msg
+        for msg in state["messages"]
+        if isinstance(msg, (HumanMessage, AIMessage))
+        and not (
+            isinstance(msg, AIMessage)
+            and msg.content == ""
+            and msg.additional_kwargs.get("function_call")
+        )
+    ]
+
     # logging.info(f"##Agent Task: Messages: {messages}")
     llm = get_llm()
     llm_with_tool = llm.bind_tools(tools)
@@ -219,6 +232,7 @@ def generate(state: State) -> State:
 
 # WORKFLOW
 
+
 def get_workflow() -> StateGraph:
     workflow = StateGraph(State)
 
@@ -244,6 +258,7 @@ def get_workflow() -> StateGraph:
     graph = workflow.compile()
     return graph
 
+
 if __name__ == "__main__":
     inputs = State(
         {
@@ -257,16 +272,11 @@ if __name__ == "__main__":
         }
     )
     graph = get_workflow()
-    
+
     step1: State = graph.invoke(inputs)
-    
-    step1["messages"].append(
-        HumanMessage(
-            content="What is my name?"
-        )
-    )
-    
+
+    step1["messages"].append(HumanMessage(content="What is my name?"))
+
     step2: State = graph.invoke(step1)
-    
+
     print(step2)
-    
