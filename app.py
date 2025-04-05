@@ -3,7 +3,7 @@ import logging
 import streamlit as st
 
 from crawl import check_valid_url, load_web_content
-from rag import AIMessage, HumanMessage, State, SystemMessage, get_workflow
+from rag import AIMessage, HumanMessage, State, SystemMessage, get_workflow, StateGraph
 from setting import MAX_HISTORY
 
 # Set up logging
@@ -19,7 +19,7 @@ st.set_page_config(
 
 
 @st.cache_resource
-def load_workflow():
+def load_workflow() -> StateGraph:
     try:
         workflow = get_workflow()
         return workflow
@@ -29,58 +29,62 @@ def load_workflow():
         return None
 
 
-def add_message(role, content):
-    # Thêm vào định dạng Streamlit
-    st.session_state.messages.append({"role": role, "content": content})
 
-    # Thêm vào định dạng Langchain
-    if role == "user":
-        st.session_state.langchain_messages.append(HumanMessage(content=content))
-    elif role == "assistant":
-        st.session_state.langchain_messages.append(AIMessage(content=content))
-    elif role == "system":
-        st.session_state.langchain_messages.append(SystemMessage(content=content))
+# def generate_text(prompt: str) -> str:
+#     workflow = load_workflow()
 
+#     # Limit number of chat history
+#     messages = st.session_state.langchain_messages[-MAX_HISTORY:].copy()
 
-def generate_text(prompt: str) -> str:
-    workflow = load_workflow()
+#     # ensure that user prompt in context
+#     if not messages or messages[-1].content != prompt:
+#         messages.append(HumanMessage(content=prompt))
 
-    # Limit number of chat history
-    messages = st.session_state.langchain_messages[-MAX_HISTORY:].copy()
+#     state = State({"messages": messages, "rewrite_times": 0})
 
-    # ensure that user prompt in context
-    if not messages or messages[-1].content != prompt:
-        messages.append(HumanMessage(content=prompt))
+#     try:
+#         logging.info(f"Running workflow with prompt: {prompt}")
+#         result = workflow.invoke(state)
 
-    state = State({"messages": messages, "rewrite_times": 0})
+#         st.session_state.last_workflow_state = result
 
+#         if result and "messages" in result and result["messages"]:
+#             response = result["messages"][-1]
+
+#             if hasattr(response, "content"):
+#                 return response.content
+#             return str(response)
+#         else:
+#             return "I couldn't generate a response."
+#     except Exception as e:
+#         logging.error(f"Error during workflow execution: {e}")
+#         return f"An error occurred: {str(e)}"
+
+def generate(workflow: StateGraph, state: State) -> State:
+    """Generate response using the workflow and return updated state"""
     try:
-        logging.info(f"Running workflow with prompt: {prompt}")
-        result = workflow.invoke(state)
-
-        st.session_state.last_workflow_state = result
-
-        if result and "messages" in result and result["messages"]:
-            response = result["messages"][-1]
-
-            if hasattr(response, "content"):
-                return response.content
-            return str(response)
-        else:
-            return "I couldn't generate a response."
+        response_state = workflow.invoke(state)
+        logging.info(f"Workflow returned state with {len(response_state['messages'])} messages")
+        return response_state
     except Exception as e:
         logging.error(f"Error during workflow execution: {e}")
-        return f"An error occurred: {str(e)}"
+        state["messages"].append(AIMessage(content=f"An error occurred: {str(e)}"))
+        return state
 
 
 def main():
     st.title("Chatbot")
     st.write("This is a simple chatbot application.")
+    
+    workflow = load_workflow()
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
-    if "langchain_messages" not in st.session_state:
-        st.session_state.langchain_messages = []
+    if "state" not in st.session_state:
+        st.session_state.state = State({
+            "messages": [],
+            "rewrite_times": 0,
+        })
 
     with st.sidebar:
         # st.header("Settings")
@@ -101,35 +105,25 @@ def main():
         # if st.button("Upload PDF"):
         #     pdf = st.file_uploader("Upload PDF", type="pdf")
         #     ### code
-        st.header("Debug Information")
-        if st.checkbox("Show debug info"):
-            st.subheader("Streamlit Messages")
-            st.write(f"Count: {len(st.session_state.messages)}")
-            st.json(st.session_state.messages)
-
-            st.subheader("Langchain Messages")
-            st.write(f"Count: {len(st.session_state.langchain_messages)}")
-            for i, msg in enumerate(st.session_state.langchain_messages):
-                st.write(
-                    f"{i + 1}. Type: {type(msg).__name__}, Content: {msg.content[:50]}..."
-                )
-
-            st.subheader("Last Workflow State")
-            if "last_workflow_state" in st.session_state:
-                st.write(st.session_state.last_workflow_state)
                 
         if st.button("Clear History"):
-            st.session_state.messages = []
-            st.session_state.langchain_messages = []
-            st.session_state.last_workflow_state = None
+            # st.session_state.messages = []
+            # st.session_state.langchain_messages = []
+            # st.session_state.last_workflow_state = None
             st.success("History cleared!")
+            
+
+            
     # Display chat history
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.write(message["content"])
 
     if prompt := st.chat_input("Ask me anything!"):
+        # add user message to chat history
         st.session_state.messages.append({"role": "user", "content": prompt})
+        # add user message to State
+        st.session_state.state["messages"].append(HumanMessage(content=prompt))
 
         # Display user message
         with st.chat_message("user"):
@@ -138,10 +132,22 @@ def main():
         # Generate response
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                response = generate_text(prompt)
-                if response:
-                    add_message("assistant", response)
-                    st.markdown(response)
+                # Get updated state from workflow
+                updated_state = generate(workflow, st.session_state.state.copy())
+                
+                if updated_state and updated_state["messages"]:
+                    # Update the session state with new state
+                    st.session_state.state = updated_state
+                    
+                    # Get the last AI message to display
+                    last_message = updated_state["messages"][-1]
+                    response_content = last_message.content if hasattr(last_message, "content") else str(last_message)
+                    
+                    # Update UI message history
+                    st.session_state.messages.append({"role": "assistant", "content": response_content})
+                    
+                    # Display the message
+                    st.markdown(response_content)
 
 
 if __name__ == "__main__":
