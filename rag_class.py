@@ -60,18 +60,6 @@ class WorkFlow:
         )
         self.tools = [self.retriever_tool]
 
-    def reinitialize_vectorstore(self, collection_name: str):
-        """Reinitialize the vectorstore with a new collection name."""
-        self.vector_store.collection_name = collection_name
-        self.vector_store.create_vectorstore(reload_vectordb=False)
-        self.retriever = self.vector_store.retriever
-        self.retriever_tool = create_retriever_tool(
-            retriever=self.retriever,
-            name="retriever_tool",
-            description="Retrieve relevant documents from the vectorstore",
-        )
-        self.tools = [self.retriever_tool]
-
     def _get_llm(self, **kwargs):
         model_kwargs = {
             "model": self.model,
