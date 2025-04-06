@@ -60,6 +60,17 @@ class WorkFlow:
         )
         self.tools = [self.retriever_tool]
 
+    def reinitialize_vectorstore(self, collection_name: str):
+        """Reinitialize the vectorstore with a new collection name."""
+        self.vector_store.collection_name = collection_name
+        self.vector_store.create_vectorstore(reload_vectordb=False)
+        self.retriever = self.vector_store.retriever
+        self.retriever_tool = create_retriever_tool(
+            retriever=self.retriever,
+            name="retriever_tool",
+            description="Retrieve relevant documents from the vectorstore",
+        )
+        self.tools = [self.retriever_tool]
 
     def _get_llm(self, **kwargs):
         model_kwargs = {
@@ -211,19 +222,46 @@ class WorkFlow:
         logging.info("##Generate Task: Call")
         messages = state["messages"]
         user_queries = [msg.content for msg in messages if isinstance(msg, HumanMessage)]
-        question = " ".join(user_queries)
+        
+        previous_question = " ".join(user_queries[:-1])
+        previous_question = previous_question.replace("If you don't know the answer, please retrieve the documents from the vector store.", "")
+        
+        latest_question = user_queries[-1]
+        logging.info(f"##Generate Task: Latest question: {latest_question}")
+
         docs = messages[-1].content
 
-        llm = self._get_llm(temperature=0.0)
-        prompt = hub.pull("rlm/rag-prompt")
-        chain = prompt | llm | StrOutputParser()
-        response = chain.invoke({"context": docs, "question": question})
+        try:
+            llm = self._get_llm(temperature=0.0)
+            prompt_template = """You are a helpful assistant answering the user's most recent question based on the provided context.
 
-        if response:
-            logging.info(f"##Generate Task: Response: {response}")
-        else:
-            logging.info("##Generate Task: No response")
-        return {"messages": [response]}
+    Context information:
+    {context}
+
+    Previous question:
+    {previous_question}
+
+    FOCUS ON ANSWERING THIS SPECIFIC QUESTION: {question}
+
+    Provide a comprehensive answer using only information from the context. If the context doesn't contain relevant information, say so clearly."""
+            prompt = PromptTemplate(
+                template=prompt_template,
+                input_variables=["context", "previous_question", "question"],
+            )
+            
+            chain = prompt | llm | StrOutputParser()
+            response = chain.invoke({"context": docs, "previous_question": previous_question, "question": latest_question})
+
+            if response:
+                logging.info(f"##Generate Task: Response: {response[:100]}...")  # Log just beginning for large responses
+            else:
+                logging.info("##Generate Task: No response")
+                response = "I couldn't generate a response based on the available information."
+                
+            return {"messages": [AIMessage(content=response)]}  # Wrap in AIMessage
+        except Exception as e:
+            logging.error(f"##Generate Task: Error generating response: {e}")
+            return {"messages": [AIMessage(content="I encountered an error processing your request.")]}
 
     def get_workflow(self) -> StateGraph:
         workflow = StateGraph(State)
