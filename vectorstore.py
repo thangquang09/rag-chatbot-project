@@ -1,6 +1,7 @@
 import logging
 import os
 from typing import List, Union
+import hashlib
 
 from langchain.docstore.document import Document
 from langchain_chroma import Chroma
@@ -10,7 +11,6 @@ from file_loader import TextSplitter
 from setting import K
 
 logging.basicConfig(level=logging.INFO)
-
 
 class VectorStore:
     def __init__(
@@ -85,12 +85,11 @@ class VectorStore:
             embedding=self.embeddings,
             persist_directory=self.persist_directory,
         )
-        # self.vectorstore.persist()
         self.retriever = self.vectorstore.as_retriever(search_kwargs={"k": K})
         return self.vectorstore, self.retriever
 
     def add_documents(self, documents: List[Document]):
-        """Add pre-split documents to the existing vectorstore.
+        """Add pre-split documents to the existing vectorstore, avoiding duplicates.
     
         Args:
             documents: List of already split/processed Document objects
@@ -101,50 +100,24 @@ class VectorStore:
             )
 
         try:
-            # Add documents and persist changes
-            self.vectorstore.add_documents(documents)
-            # self.vectorstore.persist()
-            logging.info(f"Successfully added {len(documents)} documents to vectorstore")
+            # List to hold new documents that aren't duplicates
+            new_docs = []
+            new_ids = []
+            
+            for doc in documents:
+                # Generate a unique ID based on document content
+                doc_id = hashlib.md5(doc.page_content.encode()).hexdigest()
+                # Check if this ID already exists in the vectorstore
+                if not self.vectorstore.get(doc_id)["ids"]:
+                    new_docs.append(doc)
+                    new_ids.append(doc_id)
+            
+            if new_docs:
+                # Add only non-duplicate documents with their IDs
+                self.vectorstore.add_documents(documents=new_docs, ids=new_ids)
+                logging.info(f"Successfully added {len(new_docs)} new documents to vectorstore")
+            else:
+                logging.info("No new documents to add; all were duplicates")
         except Exception as e:
             logging.error(f"Error adding documents to vectorstore: {e}")
             raise
-
-
-# def get_vectorstore_retriever():
-#     urls = [
-#         "https://lilianweng.github.io/posts/2023-06-23-agent/",
-#         "https://lilianweng.github.io/posts/2023-03-15-prompt-engineering/",
-#         "https://lilianweng.github.io/posts/2023-10-25-adv-attack-llm/",
-#     ]
-
-#     embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
-#     persist_directory = "chroma_db"
-#     collection_name = "rag-chroma"
-
-#     if os.path.exists(persist_directory) and os.listdir(persist_directory):
-#         logging.info("Loading existing vector database...")
-#         vectorstore = Chroma(
-#             persist_directory=persist_directory,
-#             embedding_function=embeddings,
-#             collection_name=collection_name,
-#         )
-#     else:
-#         logging.info("Creating new vector database...")
-#         docs = [WebBaseLoader(url).load() for url in urls]
-#         docs_list = [item for sublist in docs for item in sublist]
-
-#         text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
-#             chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP
-#         )
-#         doc_splits = text_splitter.split_documents(docs_list)
-
-#         vectorstore = Chroma.from_documents(
-#             documents=doc_splits,
-#             collection_name=collection_name,
-#             embedding=embeddings,
-#             persist_directory=persist_directory,
-#         )
-#         vectorstore.persist()
-
-#     retriever = vectorstore.as_retriever(search_kwargs={"k": K})
-#     return vectorstore, retriever
