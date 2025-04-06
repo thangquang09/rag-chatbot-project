@@ -42,17 +42,12 @@ class WorkFlow:
     ):
         self.model = model
         self.model_provider = model_provider
-        # self.kwargs = kwargs
-        # self.vectorstore, self.retriever = get_vectorstore_retriever()
-
-        #### NEW CODE
         self.vector_store = VectorStore(
             persist_directory="test_vectorstore_folder",
             collection_name="test_collection",
         )
         self.retriever = self.vector_store.retriever
 
-        #### END OF NEW CODE
         self.retriever_tool = create_retriever_tool(
             retriever=self.retriever,
             name="retriever_tool",
@@ -106,10 +101,8 @@ class WorkFlow:
             Give a binary score 'yes' or 'no' to indicate whether the document has ANY relevance to the question.""",
             input_variables=["context", "question"],
         )
-        
-        llm = self._get_llm(temperature=0.3).with_structured_output(
-            Grade
-        )
+
+        llm = self._get_llm(temperature=0.3).with_structured_output(Grade)
         chain = prompt | llm
         scored_result = chain.invoke(
             {"question": question, "context": docs}
@@ -209,11 +202,16 @@ class WorkFlow:
         """Generate a response based on the retrieved documents"""
         logging.info("##Generate Task: Call")
         messages = state["messages"]
-        user_queries = [msg.content for msg in messages if isinstance(msg, HumanMessage)]
-        
+        user_queries = [
+            msg.content for msg in messages if isinstance(msg, HumanMessage)
+        ]
+
         previous_question = " ".join(user_queries[:-1])
-        previous_question = previous_question.replace("If you don't know the answer, please retrieve the documents from the vector store.", "")
-        
+        previous_question = previous_question.replace(
+            "If you don't know the answer, please retrieve the documents from the vector store.",
+            "",
+        )
+
         latest_question = user_queries[-1]
         logging.info(f"##Generate Task: Latest question: {latest_question}")
 
@@ -236,20 +234,34 @@ class WorkFlow:
                 template=prompt_template,
                 input_variables=["context", "previous_question", "question"],
             )
-            
+
             chain = prompt | llm | StrOutputParser()
-            response = chain.invoke({"context": docs, "previous_question": previous_question, "question": latest_question})
+            response = chain.invoke(
+                {
+                    "context": docs,
+                    "previous_question": previous_question,
+                    "question": latest_question,
+                }
+            )
 
             if response:
-                logging.info(f"##Generate Task: Response: {response[:100]}...")  # Log just beginning for large responses
+                logging.info(
+                    f"##Generate Task: Response: {response[:100]}..."
+                )  # Log just beginning for large responses
             else:
                 logging.info("##Generate Task: No response")
-                response = "I couldn't generate a response based on the available information."
-                
+                response = (
+                    "I couldn't generate a response based on the available information."
+                )
+
             return {"messages": [AIMessage(content=response)]}  # Wrap in AIMessage
         except Exception as e:
             logging.error(f"##Generate Task: Error generating response: {e}")
-            return {"messages": [AIMessage(content="I encountered an error processing your request.")]}
+            return {
+                "messages": [
+                    AIMessage(content="I encountered an error processing your request.")
+                ]
+            }
 
     def get_workflow(self) -> StateGraph:
         workflow = StateGraph(State)

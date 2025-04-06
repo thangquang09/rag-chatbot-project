@@ -1,15 +1,15 @@
+import logging
 import os
 import tempfile
 from typing import List, Union
 
+import requests
+import validators
 from langchain.docstore.document import Document
 from langchain_community.document_loaders import PyPDFLoader, WebBaseLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from setting import CHUNK_OVERLAP, CHUNK_SIZE
-import validators
-import requests
-import logging
 
 
 class TextSplitter:
@@ -113,24 +113,26 @@ class WebLoader:
     def check_valid_url(self, url: str) -> bool:
         """
         Check if the provided URL is valid.
-        
+
         Args:
             url: The URL to validate
-            
+
         Returns:
             bool: True if URL is valid and accessible, False otherwise
         """
-        
+
         # First check URL format without making a request
         if not validators.url(url):
             logging.error(f"Invalid URL format: {url}")
             return False
-            
+
         try:
             # Use a HEAD request with timeout to check availability
             response = requests.head(url, timeout=5, allow_redirects=True)
             if response.status_code >= 400:  # Consider all 4xx and 5xx as errors
-                logging.warning(f"URL {url} returned status code {response.status_code}")
+                logging.warning(
+                    f"URL {url} returned status code {response.status_code}"
+                )
                 return False
             return True
         except requests.exceptions.RequestException as e:
@@ -147,7 +149,7 @@ class WebLoader:
         Returns:
             List[Document]: A list of document chunks after splitting
         """
-        
+
         if isinstance(urls, str):
             urls = [urls]
         # Validate each URL
@@ -157,10 +159,10 @@ class WebLoader:
                 valid_urls.append(url)
             else:
                 logging.error(f"Invalid URL: {url}")
-        
+
         docs = [WebBaseLoader(url).load() for url in valid_urls]
         docs_list = [item for sublist in docs for item in sublist]
-        
+
         doc_splits = self.text_splitter(documents=docs_list)
 
         return doc_splits

@@ -2,7 +2,7 @@ import logging
 
 import streamlit as st
 
-from crawl import check_valid_url, load_web_content
+from file_loader import PDFLoader, WebLoader
 from rag_class import (
     AIMessage,
     HumanMessage,
@@ -23,17 +23,6 @@ st.set_page_config(
     page_icon="🤖",
     layout="wide",
 )
-
-
-# @st.cache_resource
-# def load_workflow() -> StateGraph:
-#     try:
-#         workflow = get_workflow()
-#         return workflow
-#     except Exception as e:
-#         logging.error(f"Error loading workflow: {e}")
-#         st.error(f"Error loading workflow: {e}")
-#         return None
 
 
 def generate(workflow: StateGraph, state: State) -> State:
@@ -69,24 +58,48 @@ def main():
 
     with st.sidebar:
         st.header("Settings")
-        url = st.text_input("Search URL:")
-        flag = check_valid_url(url)
-        if flag:
-            try:
-                all_splits = load_web_content(url)
-                logging.info(f"Loaded {len(all_splits)} documents from {url}")
-                st.logging(f"Loaded {len(all_splits)} documents")
-                ### code vector .add
 
-            except Exception as e:
-                logging.error(f"Error loading URL: {str(e)}")
-                st.error(f"Error loading URL: {str(e)}")
-        # else:
-        #     st.error("Invalid URL provided.")
-        #     ### code
-        # if st.button("Upload PDF"):
-        #     pdf = st.file_uploader("Upload PDF", type="pdf")
-        #     ### code
+        st.subheader("Upload PDF")
+        pdf_files = st.file_uploader(
+            "Upload PDF", type="pdf", accept_multiple_files=True
+        )
+
+        # Then add a button to process files that are already uploaded
+        if st.button("Process PDFs") and pdf_files:
+            with st.spinner("Processing PDFs..."):
+                loader = PDFLoader()
+                all_splits = []
+                for pdf_file in pdf_files:
+                    try:
+                        splits = loader.load(pdf_file)
+                        all_splits.extend(splits)
+                        logging.info(
+                            f"Loaded {len(splits)} documents from {pdf_file.name}"
+                        )
+                    except Exception as e:
+                        logging.error(f"Error loading PDF: {str(e)}")
+                        st.error(f"Error loading PDF: {str(e)}")
+
+                if all_splits:
+                    RAG_workflow.vector_store.add_documents(documents=all_splits)
+                    st.success("Added document to vector store!")
+
+        st.subheader("Add Web Content")
+        urls = st.text_area("Enter website URLs (one per line):")
+        if st.button("Process URLs") and urls:
+            with st.spinner("Processing URLs..."):
+                urls_list = [url.strip() for url in urls.split("\n") if url.strip()]
+                if urls_list:
+                    loader = WebLoader()
+
+                    try:
+                        all_splits = loader.load(urls_list)
+                        RAG_workflow.vector_store.add_documents(documents=all_splits)
+                    except Exception as e:
+                        logging.error(f"Error loading URL content: {str(e)}")
+                        st.error(f"Error loading URL: {str(e)}")
+
+                    st.success("Added document to vector store!")
 
         if st.button("Clear History"):
             if "messages" in st.session_state:
@@ -109,7 +122,10 @@ def main():
         # add user message to chat history
         st.session_state.messages.append({"role": "user", "content": prompt})
         # add user message to State
-        st.session_state.state["messages"].append(HumanMessage(content=prompt))
+        performance_prompt = f"{prompt}\nIf you don't know the answer, please retrieve the documents from the vector store."
+        st.session_state.state["messages"].append(
+            HumanMessage(content=performance_prompt)
+        )
 
         # Display user message
         with st.chat_message("user"):
