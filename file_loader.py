@@ -1,12 +1,15 @@
 import os
 import tempfile
-from typing import List
+from typing import List, Union
 
 from langchain.docstore.document import Document
 from langchain_community.document_loaders import PyPDFLoader, WebBaseLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from setting import CHUNK_OVERLAP, CHUNK_SIZE
+import validators
+import requests
+import logging
 
 
 class TextSplitter:
@@ -107,7 +110,34 @@ class WebLoader:
         """
         self.text_splitter = text_splitter or TextSplitter()
 
-    def load(self, url):
+    def check_valid_url(self, url: str) -> bool:
+        """
+        Check if the provided URL is valid.
+        
+        Args:
+            url: The URL to validate
+            
+        Returns:
+            bool: True if URL is valid and accessible, False otherwise
+        """
+        
+        # First check URL format without making a request
+        if not validators.url(url):
+            logging.error(f"Invalid URL format: {url}")
+            return False
+            
+        try:
+            # Use a HEAD request with timeout to check availability
+            response = requests.head(url, timeout=5, allow_redirects=True)
+            if response.status_code >= 400:  # Consider all 4xx and 5xx as errors
+                logging.warning(f"URL {url} returned status code {response.status_code}")
+                return False
+            return True
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Error connecting to {url}: {e}")
+            return False
+
+    def load(self, urls: Union[str, List[str]]) -> List[Document]:
         """
         Load web content from a URL.
 
@@ -117,8 +147,20 @@ class WebLoader:
         Returns:
             List[Document]: A list of document chunks after splitting
         """
-        loader = WebBaseLoader(url)
-        documents = loader.load()
+        
+        if isinstance(urls, str):
+            urls = [urls]
+        # Validate each URL
+        valid_urls = []
+        for url in urls:
+            if self.check_valid_url(url):
+                valid_urls.append(url)
+            else:
+                logging.error(f"Invalid URL: {url}")
+        
+        docs = [WebBaseLoader(url).load() for url in valid_urls]
+        docs_list = [item for sublist in docs for item in sublist]
+        
+        doc_splits = self.text_splitter(documents=docs_list)
 
-        # Split the documents into chunks
-        return self.text_splitter(documents) if documents else []
+        return doc_splits
