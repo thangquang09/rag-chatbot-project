@@ -20,8 +20,8 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
-from utils import get_history_from_messages, get_n_user_queries
-from vectorstore import get_vectorstore_retriever
+from utils import get_n_user_queries
+from vectorstore import VectorStore
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -30,6 +30,7 @@ logging.basicConfig(level=logging.INFO)
 class State(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
     rewrite_times: int
+    retrieval_query = str
 
 
 class WorkFlow:
@@ -37,37 +38,49 @@ class WorkFlow:
         self,
         model: str = "gemini-2.0-flash",
         model_provider: str = "google_genai",
-        **kwargs,
+        # **kwargs,
     ):
         self.model = model
         self.model_provider = model_provider
-        self.kwargs = kwargs
-        self.vectorstore, self.retriever = get_vectorstore_retriever()
+        # self.kwargs = kwargs
+        # self.vectorstore, self.retriever = get_vectorstore_retriever()
+
+        #### NEW CODE
+        self.vector_store = VectorStore(
+            persist_directory="test_vectorstore_folder",
+            collection_name="test_collection",
+        )
+        self.retriever = self.vector_store.retriever
+
+        #### END OF NEW CODE
         self.retriever_tool = create_retriever_tool(
             retriever=self.retriever,
             name="retriever_tool",
-            description="Return relevant documents",
+            description="Retrieve relevant documents from the vectorstore",
         )
         self.tools = [self.retriever_tool]
-        self.llm = self._get_llm()
 
-    def _get_llm(self):
+
+    def _get_llm(self, **kwargs):
         model_kwargs = {
             "model": self.model,
             "model_provider": self.model_provider,
             "GOOGLE_API_KEY": os.getenv("GOOGLE_API_KEY"),
-            "temperature": self.kwargs.get("temperature", 0.7),
-            "max_tokens": self.kwargs.get("max_tokens", 1024),
-            "top_p": self.kwargs.get("top_p", 0.95),
-            "streaming": self.kwargs.get("streaming", False),
+            "temperature": kwargs.get("temperature", 0.7),
+            "max_tokens": kwargs.get("max_tokens", 1024),
+            "top_p": kwargs.get("top_p", 0.95),
+            "streaming": kwargs.get("streaming", False),
         }
+
         model_kwargs = {k: v for k, v in model_kwargs.items() if v is not None}
-        return init_chat_model(**model_kwargs)
+
+        model = init_chat_model(**model_kwargs)
+        return model
 
     def grade_documents(self, state: State) -> Literal["generate", "rewrite"]:
         """Check if documents are relevant to query"""
         rewrite_times = state.get("rewrite_times", 0)
-        if rewrite_times > 2:
+        if rewrite_times >= 2:
             logging.info(
                 "##Grading Task: Rewrite times exceeded return 'generate' task"
             )
@@ -86,15 +99,18 @@ class WorkFlow:
         logging.info(f"##Grading task: Docs: {docs[:30]}...")
 
         prompt = PromptTemplate(
-            template="""You are a grader assessing relevance of a retrieved document to a user question. \n 
+            template="""You are a grader assessing relevance of a retrieved document to a user question. 
             Here is the retrieved document: \n\n {context} \n\n
             Here is the user question: {question} \n
-            If the document contains keyword(s) or semantic meaning related to the user question, grade it as relevant. \n
-            Give a binary score 'yes' or 'no' score to indicate whether the document is relevant to the question.""",
+            Even if the document contains only PARTIALLY relevant information or background context
+            that might help answer the question, consider it relevant.
+            Give a binary score 'yes' or 'no' to indicate whether the document has ANY relevance to the question.""",
             input_variables=["context", "question"],
         )
-
-        llm = self.llm.with_structured_output(Grade)
+        
+        llm = self._get_llm(temperature=0.3).with_structured_output(
+            Grade
+        )
         chain = prompt | llm
         scored_result = chain.invoke(
             {"question": question, "context": docs}
@@ -111,6 +127,13 @@ class WorkFlow:
 
     def agent(self, state: State) -> State:
         logging.info("##Agent Task: Call")
+
+        system_message = SystemMessage(
+            content="""You are an intelligent assistant named ChatChatAI with access to a document retrieval tool to find information in a knowledge base.
+            Please answer the user's questions, if you don't know the answer, please use the retrieval tool to find relevant documents in vectorstore.
+            """
+        )
+
         messages = [
             msg
             for msg in state["messages"]
@@ -122,7 +145,9 @@ class WorkFlow:
             )
         ]
 
-        llm_with_tool = self.llm.bind_tools(self.tools)
+        messages.insert(0, system_message)
+        llm = self._get_llm(temperature=0.0)
+        llm_with_tool = llm.bind_tools(self.tools)
         response = llm_with_tool.invoke(messages)
         return {"messages": [response]}
 
@@ -160,7 +185,7 @@ class WorkFlow:
             input_variables=["query"],
         )
 
-        llm = self.llm.with_structured_output(RewrittenQuery)
+        llm = self._get_llm(temperature=0.0).with_structured_output(RewrittenQuery)
         chain = prompt | llm
 
         try:
@@ -177,7 +202,7 @@ class WorkFlow:
         except Exception as e:
             logging.error(f"##Rewrite Task: Error: {e}")
             return {
-                **state,
+                "messages": [HumanMessage(content="Can't rewrite the query")],
                 "rewrite_times": new_rewrite_count,
             }
 
@@ -185,11 +210,13 @@ class WorkFlow:
         """Generate a response based on the retrieved documents"""
         logging.info("##Generate Task: Call")
         messages = state["messages"]
-        question = get_n_user_queries(messages, 1)
+        user_queries = [msg.content for msg in messages if isinstance(msg, HumanMessage)]
+        question = " ".join(user_queries)
         docs = messages[-1].content
 
+        llm = self._get_llm(temperature=0.0)
         prompt = hub.pull("rlm/rag-prompt")
-        chain = prompt | self.llm | StrOutputParser()
+        chain = prompt | llm | StrOutputParser()
         response = chain.invoke({"context": docs, "question": question})
 
         if response:
