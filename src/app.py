@@ -39,9 +39,21 @@ def generate(workflow: StateGraph, state: State) -> State:
         return state
 
 
+def clear_history():
+    if "messages" in st.session_state:
+        st.session_state.messages = []
+    if "state" in st.session_state:
+        st.session_state.state = State(
+            {
+                "messages": [],
+                "rewrite_times": 0,
+            }
+        )
+    st.success("History cleared!")
+
+
 def main():
-    st.title("Chatbot")
-    st.write("This is a simple chatbot application.")
+    st.title("Retrieval-Augmented Generation (RAG) Chatbot")
 
     RAG_workflow = WorkFlow()
     workflow = RAG_workflow.get_workflow()
@@ -59,65 +71,71 @@ def main():
     with st.sidebar:
         st.header("Settings")
 
+        if st.button("Clear History"):
+            clear_history()
+
+        if st.button("Clear Workspace"):
+            with st.spinner("Clearing workspace..."):
+                try:
+                    RAG_workflow.vector_store.clear_vectorstore()
+                    clear_history()
+                    st.success("Vectorstore cleared and reset with placeholder!")
+                except Exception as e:
+                    logging.error(f"Error clearing vectorstore: {e}")
+                    st.error(f"Error clearing vectorstore: {str(e)}")
+
         st.subheader("Upload PDF")
         pdf_files = st.file_uploader(
             "Upload PDF", type="pdf", accept_multiple_files=True
         )
+        if pdf_files:
+            # Then add a button to process files that are already uploaded
+            if st.button("Process PDFs") and pdf_files:
+                with st.spinner("Processing PDFs..."):
+                    loader = PDFLoader()
+                    all_splits = []
+                    for pdf_file in pdf_files:
+                        try:
+                            splits = loader.load(
+                                pdf_file=pdf_file, original_filename=pdf_file.name
+                            )
+                            all_splits.extend(splits)
+                            logging.info(
+                                f"Loaded {len(splits)} documents from {pdf_file.name}"
+                            )
+                        except Exception as e:
+                            logging.error(f"Error loading PDF: {str(e)}")
+                            st.error(f"Error loading PDF: {str(e)}")
 
-        # Then add a button to process files that are already uploaded
-        if st.button("Process PDFs") and pdf_files:
-            with st.spinner("Processing PDFs..."):
-                loader = PDFLoader()
-                all_splits = []
-                for pdf_file in pdf_files:
-                    try:
-                        splits = loader.load(pdf_file)
-                        all_splits.extend(splits)
-                        logging.info(
-                            f"Loaded {len(splits)} documents from {pdf_file.name}"
-                        )
-                    except Exception as e:
-                        logging.error(f"Error loading PDF: {str(e)}")
-                        st.error(f"Error loading PDF: {str(e)}")
-
-                if all_splits:
-                    RAG_workflow.vector_store.add_documents(documents=all_splits)
-                    st.success("Added document to vector store!")
+                    if all_splits:
+                        RAG_workflow.vector_store.add_documents(documents=all_splits)
+                        st.success("Added document to vector store!")
 
         st.subheader("Add Web Content")
         urls = st.text_area("Enter website URLs (one per line):")
-        if st.button("Process URLs") and urls:
-            with st.spinner("Processing URLs..."):
-                urls_list = [url.strip() for url in urls.split("\n") if url.strip()]
-                logging.info(
-                    f"Processing {len(urls_list)} URLs: {', '.join(urls_list)}"
-                )
-                if urls_list:
-                    loader = WebLoader()
+        if urls:
+            if st.button("Process URLs") and urls:
+                with st.spinner("Processing URLs..."):
+                    urls_list = [url.strip() for url in urls.split("\n") if url.strip()]
+                    logging.info(
+                        f"Processing {len(urls_list)} URLs: {', '.join(urls_list)}"
+                    )
+                    if urls_list:
+                        loader = WebLoader()
 
-                    try:
-                        all_splits = loader.load(urls_list)
-                        logging.info(
-                            f"Loading {len(all_splits)} documents from URLs"
-                        )
-                        RAG_workflow.vector_store.add_documents(documents=all_splits)
-                    except Exception as e:
-                        logging.error(f"Error loading URL content: {str(e)}")
-                        st.error(f"Error loading URL: {str(e)}")
+                        try:
+                            all_splits = loader.load(urls_list)
+                            logging.info(
+                                f"Loading {len(all_splits)} documents from URLs"
+                            )
+                            RAG_workflow.vector_store.add_documents(
+                                documents=all_splits
+                            )
+                        except Exception as e:
+                            logging.error(f"Error loading URL content: {str(e)}")
+                            st.error(f"Error loading URL: {str(e)}")
 
-                    st.success("Added document to vector store!")
-
-        if st.button("Clear History"):
-            if "messages" in st.session_state:
-                st.session_state.messages = []
-            if "state" in st.session_state:
-                st.session_state.state = State(
-                    {
-                        "messages": [],
-                        "rewrite_times": 0,
-                    }
-                )
-            st.success("History cleared!")
+                        st.success("Added document to vector store!")
 
     # Display chat history
     for message in st.session_state.messages:
@@ -128,9 +146,7 @@ def main():
         # add user message to chat history
         st.session_state.messages.append({"role": "user", "content": prompt})
         # add user message to State
-        st.session_state.state["messages"].append(
-            HumanMessage(content=prompt)
-        )
+        st.session_state.state["messages"].append(HumanMessage(content=prompt))
 
         # Display user message
         with st.chat_message("user"):
