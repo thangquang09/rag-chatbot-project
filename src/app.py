@@ -89,11 +89,17 @@ def main():
         if st.button("Process URLs") and urls:
             with st.spinner("Processing URLs..."):
                 urls_list = [url.strip() for url in urls.split("\n") if url.strip()]
+                logging.info(
+                    f"Processing {len(urls_list)} URLs: {', '.join(urls_list)}"
+                )
                 if urls_list:
                     loader = WebLoader()
 
                     try:
                         all_splits = loader.load(urls_list)
+                        logging.info(
+                            f"Loading {len(all_splits)} documents from URLs"
+                        )
                         RAG_workflow.vector_store.add_documents(documents=all_splits)
                     except Exception as e:
                         logging.error(f"Error loading URL content: {str(e)}")
