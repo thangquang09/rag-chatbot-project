@@ -24,10 +24,20 @@ class VectorStore:
         self.embeddings = GoogleGenerativeAIEmbeddings(
             model="models/text-embedding-004"
         )
+        self.sources = set()
         self.vectorstore = None
         self.retriever = None
         self.vectorstore, self.retriever = self.create_vectorstore(docs_list=documents)
-
+        
+        if documents:
+            self._update_sources(documents)
+            
+    def _update_sources(self, documents: List[Document]):
+        """Update list of sources from new documents."""
+        for doc in documents:
+            if "source" in doc.metadata:
+                self.sources.add(doc.metadata["source"])
+        
     def check_vectorstore_exists(self) -> bool:
         """Check if the vectorstore already exists."""
         return os.path.exists(self.persist_directory) and os.listdir(
@@ -50,6 +60,11 @@ class VectorStore:
                 embedding_function=self.embeddings,
                 collection_name=self.collection_name,
             )
+            all_docs = self.vectorstore.get()
+            self.sources.clear()
+            for metadata in all_docs.get("metadatas", []):
+                if metadata and "source" in metadata:
+                    self.sources.add(metadata["source"])
             self.retriever = self.vectorstore.as_retriever(search_kwargs={"k": K})
             return self.vectorstore, self.retriever
 
@@ -95,29 +110,60 @@ class VectorStore:
             documents: List of already split/processed Document objects
         """
         if self.vectorstore is None:
-            raise ValueError(
-                "Vectorstore not initialized. Please create or load it first."
-            )
-
+            raise ValueError("Vectorstore not initialized.")
         try:
-            # List to hold new documents that aren't duplicates
             new_docs = []
             new_ids = []
-            
             for doc in documents:
-                # Generate a unique ID based on document content
                 doc_id = hashlib.md5(doc.page_content.encode()).hexdigest()
-                # Check if this ID already exists in the vectorstore
                 if not self.vectorstore.get(doc_id)["ids"]:
                     new_docs.append(doc)
                     new_ids.append(doc_id)
-            
             if new_docs:
-                # Add only non-duplicate documents with their IDs
                 self.vectorstore.add_documents(documents=new_docs, ids=new_ids)
+                self._update_sources(new_docs)  # update sources when new documents are added
                 logging.info(f"Successfully added {len(new_docs)} new documents to vectorstore")
             else:
                 logging.info("No new documents to add; all were duplicates")
         except Exception as e:
             logging.error(f"Error adding documents to vectorstore: {e}")
+            raise
+        
+    def get_unique_sources(self) -> List[str]:
+        """return self.sources"""
+        return sorted(list(self.sources)) if self.sources else ["No sources available"]
+    
+    def clear_vectorstore(self):
+        """Remove all stored documents and keep only a placeholder."""
+        if self.vectorstore is None:
+            raise ValueError("Vectorstore not initialized.")
+        
+        try:
+            # Delete all documents from the vectorstore
+            all_ids = self.vectorstore.get()["ids"]
+            if all_ids:
+                self.vectorstore.delete(ids=all_ids)
+                logging.info(f"Deleted {len(all_ids)} documents from vectorstore")
+            
+            # Delete sources
+            self.sources.clear()
+            
+            # Add placeholder document
+            placeholder_doc = Document(
+                page_content="Placeholder content",
+                metadata={"source": "placeholder"}
+            )
+            text_splitter = TextSplitter()
+            doc_splits = text_splitter(documents=[placeholder_doc])
+            
+            # Add placeholder into vectorstore
+            self.vectorstore.add_documents(documents=doc_splits)
+            self._update_sources(doc_splits)
+            logging.info("Added placeholder document to vectorstore")
+            
+            # Update retriever
+            self.retriever = self.vectorstore.as_retriever(search_kwargs={"k": K})
+            
+        except Exception as e:
+            logging.error(f"Error clearing vectorstore: {e}")
             raise

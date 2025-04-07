@@ -116,10 +116,13 @@ class WorkFlow:
     def agent(self, state: State) -> State:
         logging.info("##Agent Task: Call")
 
-        system_message = SystemMessage(
-            content=SYSTEM_MESSAGE
-        )
+        sources = self.vector_store.get_unique_sources()
+        source_list_str = "\n- " + "\n- ".join(sources) if sources else "- No sources available"
+        logging.info(f"##Agent Task: Sources: {source_list_str}")
 
+        system_message = SystemMessage(
+            content=SYSTEM_MESSAGE.format(source_list=source_list_str)
+        )
         messages = state["messages"]
 
         messages = [system_message] + messages
@@ -194,17 +197,6 @@ class WorkFlow:
 
         try:
             llm = self._get_llm(temperature=0.0)
-    #         prompt_template = """You are a helpful assistant answering the user's most recent question based on the provided context.
-
-    # Context information:
-    # {context}
-
-    # Previous question:
-    # {previous_question}
-
-    # FOCUS ON ANSWERING THIS SPECIFIC QUESTION: {question}
-
-    # Provide a comprehensive answer using only information from the context. If the context doesn't contain relevant information, say so clearly."""
             prompt = PromptTemplate(
                 template=GENERATE_PROMPT,
                 input_variables=["context", "previous_question", "question"],
