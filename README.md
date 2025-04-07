@@ -4,6 +4,12 @@
 
 RAG Chatbot Project is a powerful application that uses Retrieval-Augmented Generation (RAG) to create context-aware chatbots. The application combines document retrieval with language model capabilities to provide accurate, contextually relevant responses to user queries.
 
+### Architecture
+
+![Project Architecture](rag_architecture.png)
+
+### Demo
+
 **User Interface**
 
 https://github.com/user-attachments/assets/ce95269b-ab4d-4d7a-83ff-a58a1ca7aecd
