@@ -6,14 +6,10 @@ RAG Chatbot Project is a powerful application that uses Retrieval-Augmented Gene
 
 **User Interface**
 
-<video controls src="demo/demo1.mp4" title="User Interface"></video> 
 
 **RAG on PDF files and Web content**
 
-<video controls style="width: 300px; cursor:pointer;" onclick="this.requestFullscreen()">
-  <source src="demo/demo2.mp4" type="video/mp4" />
-  Your browser does not support the video tag.
-</video>
+
 
 ## Features
 - Process and index documents for knowledge retrieval
