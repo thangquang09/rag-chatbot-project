@@ -9,7 +9,7 @@ from langchain.docstore.document import Document
 from langchain_community.document_loaders import PyPDFLoader, WebBaseLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from setting import CHUNK_OVERLAP, CHUNK_SIZE
+from setting import CHUNK_OVERLAP, CHUNK_SIZE, USER_AGENT
 
 
 class TextSplitter:
@@ -163,7 +163,7 @@ class WebLoader:
             else:
                 logging.error(f"Invalid URL: {url}")
 
-        docs = [WebBaseLoader(url).load() for url in valid_urls]
+        docs = [WebBaseLoader(url, {"User-Agent": USER_AGENT}).load() for url in valid_urls]
         docs_list = [item for sublist in docs for item in sublist]
 
         doc_splits = self.text_splitter(documents=docs_list)
