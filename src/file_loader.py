@@ -39,7 +39,7 @@ class PDFLoader:
         """
         self.text_splitter = text_splitter or TextSplitter()
 
-    def _load_from_file_object(self, pdf_file):
+    def _load_from_file_object(self, pdf_file, original_filename: str = None):
         """
         Helper method to load a PDF from a file object.
 
@@ -56,6 +56,9 @@ class PDFLoader:
         try:
             loader = PyPDFLoader(temp_path)
             documents = loader.load()
+            if original_filename:
+                for doc in documents:
+                    doc.metadata["source"] = original_filename
         finally:
             # Ensure cleanup happens even if loading fails
             os.unlink(temp_path)
@@ -75,7 +78,7 @@ class PDFLoader:
         loader = PyPDFLoader(path_string)
         return loader.load()
 
-    def load(self, pdf_file=None, path_string=None):
+    def load(self, pdf_file=None, path_string=None, original_filename: str = None):
         """
         Load PDF content either from a file uploaded via Streamlit or from a path.
 
@@ -90,7 +93,7 @@ class PDFLoader:
             ValueError: If neither pdf_file nor path_string is provided
         """
         if pdf_file is not None:
-            documents = self._load_from_file_object(pdf_file)
+            documents = self._load_from_file_object(pdf_file, original_filename)
         elif path_string is not None:
             documents = self._load_from_path(path_string)
         else:
