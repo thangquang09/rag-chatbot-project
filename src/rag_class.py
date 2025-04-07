@@ -20,6 +20,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
+from prompts import GENERATE_PROMPT, GRADE_PROMPT, REWRITE_PROMPT, SYSTEM_MESSAGE
 from utils import get_n_user_queries
 from vectorstore import VectorStore
 
@@ -93,12 +94,7 @@ class WorkFlow:
         logging.info(f"##Grading task: Docs: {docs[:30]}...")
 
         prompt = PromptTemplate(
-            template="""You are a grader assessing relevance of a retrieved document to a user question. 
-            Here is the retrieved document: \n\n {context} \n\n
-            Here is the user question: {question} \n
-            Even if the document contains only PARTIALLY relevant information or background context
-            that might help answer the question, consider it relevant.
-            Give a binary score 'yes' or 'no' to indicate whether the document has ANY relevance to the question.""",
+            template=GRADE_PROMPT,
             input_variables=["context", "question"],
         )
 
@@ -121,23 +117,13 @@ class WorkFlow:
         logging.info("##Agent Task: Call")
 
         system_message = SystemMessage(
-            content="""You are an intelligent assistant named ChatChatAI with access to a document retrieval tool to find information in a knowledge base.
-            Please answer the user's questions, if you don't know the answer, please use the retrieval tool to find relevant documents in vectorstore.
-            """
+            content=SYSTEM_MESSAGE
         )
 
-        messages = [
-            msg
-            for msg in state["messages"]
-            if isinstance(msg, (HumanMessage, AIMessage))
-            and not (
-                isinstance(msg, AIMessage)
-                and msg.content == ""
-                and msg.additional_kwargs.get("function_call")
-            )
-        ]
+        messages = state["messages"]
 
-        messages.insert(0, system_message)
+        messages = [system_message] + messages
+
         llm = self._get_llm(temperature=0.0)
         llm_with_tool = llm.bind_tools(self.tools)
         response = llm_with_tool.invoke(messages)
@@ -162,18 +148,7 @@ class WorkFlow:
             )
 
         prompt = PromptTemplate(
-            template="""You are an AI assistant helping to improve search queries.
-            Original query: {query}
-            
-            Rewrite this query to:
-            1. Be more specific and detailed
-            2. Include key terms that might appear in relevant documents
-            3. Focus on the core information need
-            
-            Provide:
-            1. The rewritten query
-            2. A brief explanation of how you improved it
-            """,
+            template=REWRITE_PROMPT,
             input_variables=["query"],
         )
 
@@ -219,19 +194,19 @@ class WorkFlow:
 
         try:
             llm = self._get_llm(temperature=0.0)
-            prompt_template = """You are a helpful assistant answering the user's most recent question based on the provided context.
+    #         prompt_template = """You are a helpful assistant answering the user's most recent question based on the provided context.
 
-    Context information:
-    {context}
+    # Context information:
+    # {context}
 
-    Previous question:
-    {previous_question}
+    # Previous question:
+    # {previous_question}
 
-    FOCUS ON ANSWERING THIS SPECIFIC QUESTION: {question}
+    # FOCUS ON ANSWERING THIS SPECIFIC QUESTION: {question}
 
-    Provide a comprehensive answer using only information from the context. If the context doesn't contain relevant information, say so clearly."""
+    # Provide a comprehensive answer using only information from the context. If the context doesn't contain relevant information, say so clearly."""
             prompt = PromptTemplate(
-                template=prompt_template,
+                template=GENERATE_PROMPT,
                 input_variables=["context", "previous_question", "question"],
             )
 
@@ -288,20 +263,20 @@ if __name__ == "__main__":
     inputs = State(
         {
             "messages": [
-                HumanMessage(content="Hello, my name is Thang"),
-                AIMessage(content="Hello, how can I have you?"),
-                HumanMessage(
-                    content="What does Lilian Weng say about the types of agent memory?"
-                ),
+                HumanMessage(content="Tôi tên là Thắng, bạn tên là gì?"),
+                AIMessage(content="Chào bạn tôi là ChatChatAI"),
+                HumanMessage(content="Tôi đã code gì trong yêu cầu 1?"),
             ]
         }
     )
     workflow = WorkFlow()
     graph = workflow.get_workflow()
     step1: State = graph.invoke(inputs)
+    print("\n\n###########\n\n")
+    print(step1)
 
-    step1["messages"].append(HumanMessage(content="What is my name?"))
+    step1["messages"].append(HumanMessage(content="Tôi tên là gì?"))
 
     step2: State = graph.invoke(step1)
-
+    print("\n\n###########\n\n")
     print(step2)

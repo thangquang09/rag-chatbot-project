@@ -122,9 +122,8 @@ def main():
         # add user message to chat history
         st.session_state.messages.append({"role": "user", "content": prompt})
         # add user message to State
-        performance_prompt = f"{prompt}\nIf you don't know the answer, please retrieve the documents from the vector store."
         st.session_state.state["messages"].append(
-            HumanMessage(content=performance_prompt)
+            HumanMessage(content=prompt)
         )
 
         # Display user message

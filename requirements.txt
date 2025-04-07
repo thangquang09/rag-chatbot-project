@@ -11,3 +11,4 @@ Requests==2.32.3
 streamlit==1.42.2
 typing_extensions==4.13.1
 validators==0.34.0
+pypdf
