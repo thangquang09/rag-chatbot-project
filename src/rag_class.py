@@ -3,9 +3,9 @@ import os
 from typing import Annotated, Literal, Sequence
 
 from dotenv import load_dotenv
-from langchain import hub
 from langchain.chat_models import init_chat_model
 from langchain.tools.retriever import create_retriever_tool
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
 from prompts import GENERATE_PROMPT, GRADE_PROMPT, REWRITE_PROMPT, SYSTEM_MESSAGE
+from setting import BASE_URL
 from utils import get_n_user_queries
 from vectorstore import VectorStore
 
@@ -37,11 +38,11 @@ class State(TypedDict):
 class WorkFlow:
     def __init__(
         self,
-        model: str = "gemini-2.0-flash",
-        model_provider: str = "google_genai",
-        # **kwargs,
+        model_provider: Literal[
+            "google_genai", "openai", "local_llmstudio"
+        ] = "local_llmstudio",
+        **kwargs,
     ):
-        self.model = model
         self.model_provider = model_provider
         self.vector_store = VectorStore(
             persist_directory="test_vectorstore_folder",
@@ -56,21 +57,43 @@ class WorkFlow:
         )
         self.tools = [self.retriever_tool]
 
-    def _get_llm(self, **kwargs):
-        model_kwargs = {
-            "model": self.model,
-            "model_provider": self.model_provider,
-            "GOOGLE_API_KEY": os.getenv("GOOGLE_API_KEY"),
-            "temperature": kwargs.get("temperature", 0.7),
-            "max_tokens": kwargs.get("max_tokens", 1024),
-            "top_p": kwargs.get("top_p", 0.95),
-            "streaming": kwargs.get("streaming", False),
-        }
+    def _get_llm(self, model_name: str = "gemini-2.0-flash", **kwargs) -> BaseChatModel:
+        if self.model_provider == "google_genai":
+            model_kwargs = {
+                "model": model_name,
+                "model_provider": "google_genai",
+                "GOOGLE_API_KEY": os.getenv("GOOGLE_API_KEY"),
+                "temperature": kwargs.get("temperature", 0.7),
+                "max_tokens": kwargs.get("max_tokens", 1024),
+                "top_p": kwargs.get("top_p", 0.95),
+            }
+
+        elif self.model_provider == "openai":
+            model_kwargs = {
+                "model": model_name,
+                "model_provider": "openai",
+                "api_key": os.getenv("OPENAI_API_KEY"),
+                "temperature": kwargs.get("temperature", 0.7),
+                "max_tokens": kwargs.get("max_tokens", 1024),
+                "top_p": kwargs.get("top_p", 0.95),
+            }
+
+        elif self.model_provider == "local_llmstudio":
+            model_kwargs = {
+                "model": model_name,
+                "model_provider": "openai",
+                "api_key": "lm-studio",
+                "base_url": BASE_URL,
+                "temperature": kwargs.get("temperature", 0.7),
+                "max_tokens": kwargs.get("max_tokens", 1024),
+                "top_p": kwargs.get("top_p", 0.95),
+            }
+
+        else:
+            raise ValueError(f"Unsupported model provider: {self.model_provider}")
 
         model_kwargs = {k: v for k, v in model_kwargs.items() if v is not None}
-
-        model = init_chat_model(**model_kwargs)
-        return model
+        return init_chat_model(**model_kwargs)
 
     def grade_documents(self, state: State) -> Literal["generate", "rewrite"]:
         """Check if documents are relevant to query"""
@@ -117,7 +140,9 @@ class WorkFlow:
         logging.info("##Agent Task: Call")
 
         sources = self.vector_store.get_unique_sources()
-        source_list_str = "\n- " + "\n- ".join(sources) if sources else "- No sources available"
+        source_list_str = (
+            "\n- " + "\n- ".join(sources) if sources else "- No sources available"
+        )
         logging.info(f"##Agent Task: Sources: {source_list_str}")
 
         system_message = SystemMessage(

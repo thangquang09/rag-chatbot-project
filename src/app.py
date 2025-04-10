@@ -8,10 +8,8 @@ from rag_class import (
     HumanMessage,
     State,
     StateGraph,
-    SystemMessage,
     WorkFlow,
 )
-from setting import MAX_HISTORY
 
 # Set up logging
 logging.basicConfig(
@@ -55,9 +53,6 @@ def clear_history():
 def main():
     st.title("Retrieval-Augmented Generation (RAG) Chatbot")
 
-    RAG_workflow = WorkFlow()
-    workflow = RAG_workflow.get_workflow()
-
     if "messages" not in st.session_state:
         st.session_state.messages = []
     if "state" not in st.session_state:
@@ -70,6 +65,14 @@ def main():
 
     with st.sidebar:
         st.header("Settings")
+
+        model_provider = st.selectbox(
+            "Select a model",
+            options=["None", "google_genai", "openai", "local_llmstudio"],
+        )
+
+        RAG_workflow = WorkFlow(model_provider=model_provider)
+        workflow = RAG_workflow.get_workflow()
 
         if st.button("Clear History"):
             clear_history()

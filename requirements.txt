@@ -14,3 +14,4 @@ validators==0.34.0
 pypdf
 bs4
 requests
+langchain-openai
