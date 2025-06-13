@@ -2,6 +2,9 @@ import logging
 
 import streamlit as st
 
+from dotenv import load_dotenv
+
+
 from file_loader import PDFLoader, WebLoader
 from rag_class import (
     AIMessage,
@@ -10,7 +13,7 @@ from rag_class import (
     StateGraph,
     WorkFlow,
 )
-
+load_dotenv()
 # Set up logging
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -68,7 +71,7 @@ def main():
 
         model_provider = st.selectbox(
             "Select a model",
-            options=["None", "google_genai", "openai", "local_llmstudio"],
+            options=["None", "google_genai", "google_vertexai", "openai", "local_llmstudio"],
         )
 
         RAG_workflow = WorkFlow(model_provider=model_provider)

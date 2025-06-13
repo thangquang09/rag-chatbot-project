@@ -39,7 +39,7 @@ class WorkFlow:
     def __init__(
         self,
         model_provider: Literal[
-            "google_genai", "openai", "local_llmstudio"
+            "google_genai", "google_vertexai", "openai", "local_llmstudio"
         ] = "local_llmstudio",
         **kwargs,
     ):
@@ -63,6 +63,15 @@ class WorkFlow:
                 "model": model_name,
                 "model_provider": "google_genai",
                 "GOOGLE_API_KEY": os.getenv("GOOGLE_API_KEY"),
+                "temperature": kwargs.get("temperature", 0.7),
+                "max_tokens": kwargs.get("max_tokens", 1024),
+                "top_p": kwargs.get("top_p", 0.95),
+            }
+
+        elif self.model_provider == "google_vertexai":
+            model_kwargs = {
+                "model": model_name,
+                "model_provider": "google_vertexai",
                 "temperature": kwargs.get("temperature", 0.7),
                 "max_tokens": kwargs.get("max_tokens", 1024),
                 "top_p": kwargs.get("top_p", 0.95),
