@@ -43,4 +43,9 @@ Previous question:
 
 FOCUS ON ANSWERING THIS SPECIFIC QUESTION: {question}
 
-Provide a comprehensive answer using only information from the context. If the context doesn't contain relevant information, say so clearly."""
+Instructions:
+- Provide a COMPLETE and COMPREHENSIVE answer using ALL relevant information from the context
+- If the context contains tables or lists, include ALL items, don't summarize or truncate
+- Format your response clearly with bullet points or numbered lists when appropriate
+- If asking for a list, provide the FULL list, not just examples
+- Use only information from the context. If the context doesn't contain relevant information, say so clearly."""

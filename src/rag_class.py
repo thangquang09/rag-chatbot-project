@@ -1,4 +1,4 @@
-import logging
+from loguru import logger
 import os
 from typing import Annotated, Literal, Sequence
 
@@ -26,8 +26,6 @@ from utils import get_n_user_queries
 from vectorstore import VectorStore
 
 load_dotenv()
-logging.basicConfig(level=logging.INFO)
-
 
 class State(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
@@ -108,7 +106,7 @@ class WorkFlow:
         """Check if documents are relevant to query"""
         rewrite_times = state.get("rewrite_times", 0)
         if rewrite_times >= 2:
-            logging.info(
+            logger.info(
                 "##Grading Task: Rewrite times exceeded return 'generate' task"
             )
             return "generate"
@@ -122,8 +120,8 @@ class WorkFlow:
 
         if question == "":
             raise ValueError("question is None")
-        logging.info(f"##Grading task: Question: {question}")
-        logging.info(f"##Grading task: Docs: {docs[:30]}...")
+        logger.info(f"##Grading task: Question: {question}")
+        logger.info(f"##Grading task: Docs: {docs}")
 
         prompt = PromptTemplate(
             template=GRADE_PROMPT,
@@ -136,23 +134,23 @@ class WorkFlow:
             {"question": question, "context": docs}
         ).binary_score
 
-        logging.info(f"##Grading Task: scored_result = {scored_result}")
+        logger.info(f"##Grading Task: scored_result = {scored_result}")
 
         if scored_result == "yes":
-            logging.info("##Grading Task: Docs relevant")
+            logger.info("##Grading Task: Docs relevant")
             return "generate"
         else:
-            logging.info("##Grading Task: Docs not relevant")
+            logger.info("##Grading Task: Docs not relevant")
             return "rewrite"
 
     def agent(self, state: State) -> State:
-        logging.info("##Agent Task: Call")
+        logger.info("##Agent Task: Call")
 
         sources = self.vector_store.get_unique_sources()
         source_list_str = (
             "\n- " + "\n- ".join(sources) if sources else "- No sources available"
         )
-        logging.info(f"##Agent Task: Sources: {source_list_str}")
+        logger.info(f"##Agent Task: Sources: {source_list_str}")
 
         system_message = SystemMessage(
             content=SYSTEM_MESSAGE.format(source_list=source_list_str)
@@ -168,15 +166,15 @@ class WorkFlow:
 
     def rewrite(self, state: State) -> State:
         """Rewrite the user query for better documents retrieval"""
-        logging.info("##Rewrite Task: Call")
+        logger.info("##Rewrite Task: Call")
 
         current_rewrites = state.get("rewrite_times", 0)
         new_rewrite_count = current_rewrites + 1
 
         messages = state["messages"]
         original_query = get_n_user_queries(messages, 1)
-        logging.info(f"##Rewrite Task: Original query: {original_query}")
-        logging.info(f"##Rewrite Task: Attempt {new_rewrite_count}")
+        logger.info(f"##Rewrite Task: Original query: {original_query}")
+        logger.info(f"##Rewrite Task: Attempt {new_rewrite_count}")
 
         class RewrittenQuery(BaseModel):
             query: str = Field(description="The rewritten search query", min_length=3)
@@ -196,15 +194,15 @@ class WorkFlow:
             result = chain.invoke({"query": original_query})
             rewritten_query = result.query
             reasoning = result.reasoning
-            logging.info(f"##Rewrite Task: Rewritten query: {rewritten_query}")
-            logging.info(f"##Rewrite Task: Reasoning: {reasoning}")
+            logger.info(f"##Rewrite Task: Rewritten query: {rewritten_query}")
+            logger.info(f"##Rewrite Task: Reasoning: {reasoning}")
 
             return {
                 "messages": [HumanMessage(content=rewritten_query)],
                 "rewrite_times": new_rewrite_count,
             }
         except Exception as e:
-            logging.error(f"##Rewrite Task: Error: {e}")
+            logger.error(f"##Rewrite Task: Error: {e}")
             return {
                 "messages": [HumanMessage(content="Can't rewrite the query")],
                 "rewrite_times": new_rewrite_count,
@@ -212,7 +210,7 @@ class WorkFlow:
 
     def generate(self, state: State) -> State:
         """Generate a response based on the retrieved documents"""
-        logging.info("##Generate Task: Call")
+        logger.info("##Generate Task: Call")
         messages = state["messages"]
         user_queries = [
             msg.content for msg in messages if isinstance(msg, HumanMessage)
@@ -225,12 +223,12 @@ class WorkFlow:
         )
 
         latest_question = user_queries[-1]
-        logging.info(f"##Generate Task: Latest question: {latest_question}")
+        logger.info(f"##Generate Task: Latest question: {latest_question}")
 
         docs = messages[-1].content
 
         try:
-            llm = self._get_llm(temperature=0.0)
+            llm = self._get_llm(temperature=0.0, max_tokens=4096)
             prompt = PromptTemplate(
                 template=GENERATE_PROMPT,
                 input_variables=["context", "previous_question", "question"],
@@ -246,18 +244,18 @@ class WorkFlow:
             )
 
             if response:
-                logging.info(
+                logger.info(
                     f"##Generate Task: Response: {response[:100]}..."
                 )  # Log just beginning for large responses
             else:
-                logging.info("##Generate Task: No response")
+                logger.info("##Generate Task: No response")
                 response = (
                     "I couldn't generate a response based on the available information."
                 )
 
             return {"messages": [AIMessage(content=response)]}  # Wrap in AIMessage
         except Exception as e:
-            logging.error(f"##Generate Task: Error generating response: {e}")
+            logger.error(f"##Generate Task: Error generating response: {e}")
             return {
                 "messages": [
                     AIMessage(content="I encountered an error processing your request.")
