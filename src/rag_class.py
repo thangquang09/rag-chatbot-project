@@ -105,7 +105,7 @@ class WorkFlow:
     def grade_documents(self, state: State) -> Literal["generate", "rewrite"]:
         """Check if documents are relevant to query"""
         rewrite_times = state.get("rewrite_times", 0)
-        if rewrite_times >= 2:
+        if rewrite_times >= 1:
             logger.info(
                 "##Grading Task: Rewrite times exceeded return 'generate' task"
             )
