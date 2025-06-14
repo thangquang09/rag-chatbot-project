@@ -16,6 +16,9 @@ https://github.com/user-attachments/assets/ce95269b-ab4d-4d7a-83ff-a58a1ca7aecd
 ### RAG on PDF files and Web content
 https://github.com/user-attachments/assets/58395bce-4312-46d1-bd0a-98b880fa23d6
 
+### Handle Spanned Table Merging
+https://github.com/user-attachments/assets/ba1d1004-1522-42fb-b27a-34fbe3ac454d
+
 ## ⭐ Key Features
 
 This project is equipped with a suite of advanced features that set it apart from standard RAG implementations.
