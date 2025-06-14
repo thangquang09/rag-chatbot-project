@@ -1,5 +1,7 @@
 # RAG Chatbot Project
 
+![architecture](rag_architecture.png)
+
 ## Introduction
 
 This is a powerful chatbot application that utilizes the Retrieval-Augmented Generation (RAG) methodology to create context-aware conversational agents. The application combines efficient document retrieval with the power of Large Language Models (LLMs) to provide accurate, contextually relevant answers to user queries.
