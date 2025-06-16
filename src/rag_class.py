@@ -39,12 +39,27 @@ class WorkFlow:
         model_provider: Literal[
             "google_genai", "google_vertexai", "openai", "local_llmstudio"
         ] = "local_llmstudio",
+        embedding_type: str = "vertexai",
+        embedding_model: str = "text-embedding-004",
+        enable_hybrid_search: bool = False,
+        chunk_type: str = "recursive",
+        use_memory: bool = False,
         **kwargs,
     ):
         self.model_provider = model_provider
+        self.embedding_type = embedding_type
+        self.embedding_model = embedding_model
+        self.enable_hybrid_search = enable_hybrid_search
+        self.chunk_type = chunk_type
+        self.use_memory = use_memory
         self.vector_store = VectorStore(
             persist_directory="test_vectorstore_folder",
             collection_name="test_collection",
+            embedding_type=embedding_type,
+            embedding_model=embedding_model,
+            enable_hybrid_search=enable_hybrid_search,
+            chunk_type=chunk_type,
+            use_memory=use_memory,
         )
         self.retriever = self.vector_store.retriever
 

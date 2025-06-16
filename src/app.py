@@ -1,4 +1,5 @@
 from loguru import logger
+import atexit
 
 import streamlit as st
 
@@ -14,7 +15,19 @@ from rag_class import (
     StateGraph,
     WorkFlow,
 )
+from vectorstore import QdrantClientManager
 load_dotenv()
+
+# Register cleanup function to close Qdrant clients on app shutdown
+def cleanup_qdrant_clients():
+    """Cleanup function to close all Qdrant clients on app shutdown."""
+    try:
+        QdrantClientManager.close_all_clients()
+        logger.info("All Qdrant clients closed successfully")
+    except Exception as e:
+        logger.warning(f"Error during Qdrant cleanup: {e}")
+
+atexit.register(cleanup_qdrant_clients)
 
 st.set_page_config(
     page_title="RAG Chatbot",
@@ -70,9 +83,100 @@ def main():
             "Select a model",
             options=["None", "google_genai", "google_vertexai", "openai", "local_llmstudio"],
         )
+        
+        st.subheader("Embedding Settings")
+        
+        embedding_type = st.selectbox(
+            "Embedding Type",
+            options=["vertexai", "huggingface"],
+            index=0,
+            help="Choose between Google VertexAI or local HuggingFace embeddings"
+        )
+        
+        if embedding_type == "huggingface":
+            embedding_model = st.selectbox(
+                "HuggingFace Model",
+                options=[
+                    "BAAI/bge-base-en",
+                    "sentence-transformers/all-MiniLM-L6-v2",
+                    "sentence-transformers/all-mpnet-base-v2",
+                    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+                ],
+                index=0,
+                help="Select HuggingFace embedding model"
+            )
+        else:
+            embedding_model = st.selectbox(
+                "VertexAI Model", 
+                options=["text-embedding-004", "textembedding-gecko@003"],
+                index=0,
+                help="Select Google VertexAI embedding model"
+            )
+        
+        # Enable hybrid search by default for better retrieval quality
+        enable_hybrid_search = True
+        
+        chunk_type = st.selectbox(
+            "Text Chunking Strategy",
+            options=["recursive", "character"],
+            index=0,
+            help="Choose text splitting strategy: recursive (smart) or character (simple)"
+        )
+        
+        use_memory = st.checkbox(
+            "Use Memory Storage",
+            value=True,
+            help="Use in-memory storage to avoid file locking issues during development (data won't persist)"
+        )
 
-        RAG_workflow = WorkFlow(model_provider=model_provider)
+        # Cache WorkFlow in session state to avoid recreating Qdrant client on every refresh
+        workflow_key = f"workflow_{model_provider}_{embedding_type}_{embedding_model}_{enable_hybrid_search}_{chunk_type}_{use_memory}"
+        
+        if workflow_key not in st.session_state:
+            st.session_state[workflow_key] = WorkFlow(
+                model_provider=model_provider,
+                embedding_type=embedding_type,
+                embedding_model=embedding_model,
+                enable_hybrid_search=enable_hybrid_search,
+                chunk_type=chunk_type,
+                use_memory=use_memory
+            )
+        
+        RAG_workflow = st.session_state[workflow_key]
         workflow = RAG_workflow.get_workflow()
+        
+        # Display current configuration
+        with st.expander("Current Configuration", expanded=False):
+            st.write(f"**Model Provider:** {model_provider}")
+            st.write(f"**Embedding Type:** {embedding_type}")
+            st.write(f"**Embedding Model:** {embedding_model}")
+            st.write(f"**Hybrid Search:** Enabled (default)")
+            st.write(f"**Chunk Type:** {chunk_type}")
+            st.write(f"**Storage:** {'Memory (temporary)' if use_memory else 'Persistent'}")
+            
+            # Show device for HuggingFace (forced to CPU to avoid compatibility issues)
+            if embedding_type == "huggingface":
+                st.write(f"**Device:** CPU (stable compatibility)")
+            
+            # Show current sources
+            sources = RAG_workflow.vector_store.get_unique_sources()
+            if sources and sources != ["No sources available"]:
+                st.write(f"**Sources:** {len(sources)} document(s)")
+                # Show first few sources inline, with option to see all
+                if len(sources) <= 3:
+                    for source in sources:
+                        st.write(f"  - {source}")
+                else:
+                    for source in sources[:2]:
+                        st.write(f"  - {source}")
+                    st.write(f"  - ... and {len(sources) - 2} more")
+        
+        # Separate expander for viewing all sources (outside the config expander)
+        sources = RAG_workflow.vector_store.get_unique_sources()
+        if sources and sources != ["No sources available"] and len(sources) > 3:
+            with st.expander("📂 View All Sources"):
+                for i, source in enumerate(sources, 1):
+                    st.write(f"{i}. {source}")
 
         if st.button("Clear History"):
             clear_history()
@@ -86,6 +190,14 @@ def main():
                 except Exception as e:
                     logger.error(f"Error clearing vectorstore: {e}")
                     st.error(f"Error clearing vectorstore: {str(e)}")
+        
+        if st.button("🔄 Force Refresh Configuration"):
+            # Clear all workflow-related session state
+            keys_to_remove = [key for key in st.session_state.keys() if key.startswith("workflow_")]
+            for key in keys_to_remove:
+                del st.session_state[key]
+            st.success("Configuration refreshed! The page will reload with new settings.")
+            st.rerun()
 
         st.subheader("Upload PDF")
         

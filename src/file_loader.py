@@ -7,7 +7,7 @@ import requests
 import validators
 from langchain.docstore.document import Document
 from langchain_community.document_loaders import WebBaseLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter, CharacterTextSplitter
 
 from setting import CHUNK_OVERLAP, CHUNK_SIZE, USER_AGENT
 from WDMParser import WDMPDFParser
@@ -16,15 +16,30 @@ from WDMParser import WDMPDFParser
 class TextSplitter:
     def __init__(
         self,
+        chunk_type: str = "recursive",
         separators: List[str] = ["\n\n", "\n", ". ", "! ", "? ", ":", ";", " "],
         chunk_size: int = CHUNK_SIZE,
         chunk_overlap: int = CHUNK_OVERLAP,
+        separator: str = "\n\n",
     ) -> None:
-        self.splitter = RecursiveCharacterTextSplitter(
-            separators=separators,
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-        )
+        self.chunk_type = chunk_type
+        
+        if chunk_type == "recursive":
+            self.splitter = RecursiveCharacterTextSplitter(
+                separators=separators,
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+                add_start_index=True,
+            )
+        elif chunk_type == "character":
+            self.splitter = CharacterTextSplitter(
+                separator=separator,
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+                add_start_index=True,
+            )
+        else:
+            raise ValueError(f"Unsupported chunk_type: {chunk_type}. Use 'recursive' or 'character'.")
 
     def __call__(self, documents: List[Document]) -> List[Document]:
         return self.splitter.split_documents(documents)

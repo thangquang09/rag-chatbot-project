@@ -3,10 +3,11 @@ import os
 from typing import List, Union, Optional, Dict, Any
 
 from langchain.docstore.document import Document
-from langchain_qdrant import QdrantVectorStore, RetrievalMode
+from langchain_qdrant import QdrantVectorStore, RetrievalMode, FastEmbedSparse
 from langchain_google_vertexai import VertexAIEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from qdrant_client import QdrantClient, models
-from qdrant_client.http.models import Distance, VectorParams
+from qdrant_client.http.models import Distance, VectorParams, SparseVectorParams
 from loguru import logger
 
 from file_loader import TextSplitter
@@ -43,14 +44,27 @@ class VectorStore:
         persist_directory: str,
         collection_name: str,
         documents: List[Document] = None,
+        embedding_type: str = "vertexai",
+        embedding_model: str = "text-embedding-004",
+        enable_hybrid_search: bool = False,
+        chunk_type: str = "recursive",
+        use_memory: bool = False,  # New option for in-memory storage
     ):
         self.persist_directory = persist_directory
         self.collection_name = collection_name
-        self.embeddings = VertexAIEmbeddings(
-            model="text-embedding-004"
-        )
-        # Get embedding dimensions for Qdrant configuration
-        self.embedding_size = 768  # text-embedding-004 default size
+        self.embedding_type = embedding_type
+        self.embedding_model = embedding_model
+        self.enable_hybrid_search = enable_hybrid_search
+        self.chunk_type = chunk_type
+        self.use_memory = use_memory
+        
+        # Initialize embeddings based on type
+        self.embeddings = self._initialize_embeddings()
+        self.sparse_embeddings = None
+        
+        # Initialize sparse embeddings for hybrid search
+        if self.enable_hybrid_search:
+            self.sparse_embeddings = FastEmbedSparse(model_name="Qdrant/bm25")
         
         self.sources = set()
         self.vectorstore = None
@@ -62,11 +76,38 @@ class VectorStore:
 
         if documents:
             self._update_sources(documents)
+    
+    def _initialize_embeddings(self):
+        """Initialize embeddings based on the specified type."""
+        if self.embedding_type == "vertexai":
+            return VertexAIEmbeddings(model=self.embedding_model)
+        elif self.embedding_type == "huggingface":
+            # Use CPU for HuggingFace to avoid meta tensor issues with CUDA
+            return HuggingFaceEmbeddings(
+                model_name=self.embedding_model,
+                model_kwargs={"device": "cpu"},
+                encode_kwargs={"normalize_embeddings": True}
+            )
+        else:
+            raise ValueError(f"Unsupported embedding type: {self.embedding_type}")
+    
+    def _is_cuda_available(self) -> bool:
+        """Check if CUDA is available for GPU acceleration."""
+        try:
+            import torch
+            return torch.cuda.is_available()
+        except ImportError:
+            return False
 
     def _get_client(self) -> QdrantClient:
         """Get the Qdrant client, ensuring only one instance per path."""
         if self._client is None:
-            self._client = QdrantClientManager.get_client(self.persist_directory)
+            if self.use_memory:
+                # Use in-memory storage to avoid file locking issues
+                self._client = QdrantClient(location=":memory:")
+                logger.info("Created in-memory Qdrant client")
+            else:
+                self._client = QdrantClientManager.get_client(self.persist_directory)
         return self._client
 
     def _update_sources(self, documents: List[Document]):
@@ -99,15 +140,28 @@ class VectorStore:
                 embedding_size = self._get_embedding_size()
                 logger.info(f"Creating Qdrant collection '{self.collection_name}' with embedding size {embedding_size}")
                 
-                # Create collection with proper vector configuration
-                client.create_collection(
-                    collection_name=self.collection_name,
-                    vectors_config=VectorParams(
-                        size=embedding_size,
-                        distance=Distance.COSINE
+                if self.enable_hybrid_search:
+                    # Create collection with both dense and sparse vectors for hybrid search
+                    client.create_collection(
+                        collection_name=self.collection_name,
+                        vectors_config={
+                            "dense": VectorParams(size=embedding_size, distance=Distance.COSINE)
+                        },
+                        sparse_vectors_config={
+                            "sparse": SparseVectorParams(index=models.SparseIndexParams(on_disk=False))
+                        }
                     )
-                )
-                logger.info(f"Created collection '{self.collection_name}'")
+                    logger.info(f"Created hybrid collection '{self.collection_name}' with dense + sparse vectors")
+                else:
+                    # Create collection with dense vectors only
+                    client.create_collection(
+                        collection_name=self.collection_name,
+                        vectors_config=VectorParams(
+                            size=embedding_size,
+                            distance=Distance.COSINE
+                        )
+                    )
+                    logger.info(f"Created dense collection '{self.collection_name}'")
             else:
                 logger.info(f"Collection '{self.collection_name}' already exists")
                 
@@ -176,12 +230,23 @@ class VectorStore:
             logger.info("Loading existing Qdrant vector database...")
             try:
                 self._ensure_collection_exists(client)
-                self.vectorstore = QdrantVectorStore(
-                    client=client,
-                    collection_name=self.collection_name,
-                    embedding=self.embeddings,
-                    retrieval_mode=RetrievalMode.DENSE
-                )
+                if self.enable_hybrid_search:
+                    self.vectorstore = QdrantVectorStore(
+                        client=client,
+                        collection_name=self.collection_name,
+                        embedding=self.embeddings,
+                        sparse_embedding=self.sparse_embeddings,
+                        retrieval_mode=RetrievalMode.HYBRID,
+                        vector_name="dense",
+                        sparse_vector_name="sparse"
+                    )
+                else:
+                    self.vectorstore = QdrantVectorStore(
+                        client=client,
+                        collection_name=self.collection_name,
+                        embedding=self.embeddings,
+                        retrieval_mode=RetrievalMode.DENSE
+                    )
                 
                 # Load existing sources
                 self._load_existing_sources()
@@ -209,14 +274,14 @@ class VectorStore:
             placeholder_doc = Document(
                 page_content="Placeholder content", metadata={"source": "placeholder"}
             )
-            text_splitter = TextSplitter()
+            text_splitter = TextSplitter(chunk_type=self.chunk_type)
             doc_splits = text_splitter(documents=[placeholder_doc])
         else:
             # Process the provided documents
             logger.info(
                 f"Creating vectorstore from {len(docs_list) if isinstance(docs_list, list) else 1} document(s)..."
             )
-            text_splitter = TextSplitter()
+            text_splitter = TextSplitter(chunk_type=self.chunk_type)
             docs_to_process = docs_list if isinstance(docs_list, list) else [docs_list]
             doc_splits = text_splitter(documents=docs_to_process)
 
@@ -224,12 +289,23 @@ class VectorStore:
         self._ensure_collection_exists(client)
 
         # Create the vectorstore - use client directly instead of from_documents
-        self.vectorstore = QdrantVectorStore(
-            client=client,
-            collection_name=self.collection_name,
-            embedding=self.embeddings,
-            retrieval_mode=RetrievalMode.DENSE
-        )
+        if self.enable_hybrid_search:
+            self.vectorstore = QdrantVectorStore(
+                client=client,
+                collection_name=self.collection_name,
+                embedding=self.embeddings,
+                sparse_embedding=self.sparse_embeddings,
+                retrieval_mode=RetrievalMode.HYBRID,
+                vector_name="dense",
+                sparse_vector_name="sparse"
+            )
+        else:
+            self.vectorstore = QdrantVectorStore(
+                client=client,
+                collection_name=self.collection_name,
+                embedding=self.embeddings,
+                retrieval_mode=RetrievalMode.DENSE
+            )
         
         # Add documents to the vectorstore
         if doc_splits:
@@ -310,16 +386,27 @@ class VectorStore:
             placeholder_doc = Document(
                 page_content="Placeholder content", metadata={"source": "placeholder"}
             )
-            text_splitter = TextSplitter()
+            text_splitter = TextSplitter(chunk_type=self.chunk_type)
             doc_splits = text_splitter(documents=[placeholder_doc])
 
             # Recreate vectorstore with placeholder
-            self.vectorstore = QdrantVectorStore(
-                client=client,
-                collection_name=self.collection_name,
-                embedding=self.embeddings,
-                retrieval_mode=RetrievalMode.DENSE
-            )
+            if self.enable_hybrid_search:
+                self.vectorstore = QdrantVectorStore(
+                    client=client,
+                    collection_name=self.collection_name,
+                    embedding=self.embeddings,
+                    sparse_embedding=self.sparse_embeddings,
+                    retrieval_mode=RetrievalMode.HYBRID,
+                    vector_name="dense",
+                    sparse_vector_name="sparse"
+                )
+            else:
+                self.vectorstore = QdrantVectorStore(
+                    client=client,
+                    collection_name=self.collection_name,
+                    embedding=self.embeddings,
+                    retrieval_mode=RetrievalMode.DENSE
+                )
             
             # Add placeholder documents
             if doc_splits:
